@@ -1,3 +1,4 @@
+import { supabase } from '../lib/supabase';
 import type {
   CreateOrderInput,
   Order,
@@ -9,13 +10,11 @@ import type {
 } from '../types';
 import { normalizePhone } from '../utils/format';
 
-const PRODUCTS_STORAGE_KEY = 'by_sawadhee_products_v1';
-const ORDERS_STORAGE_KEY = 'by_sawadhee_orders_v1';
-const SEEDED_STORAGE_KEY = 'by_sawadhee_seeded_v1';
+const PRODUCTS_TABLE = 'sawadhee_products';
+const ORDERS_TABLE = 'sawadhee_orders';
 
-const SEED_PRODUCTS: Product[] = [
+const SEED_PRODUCTS_INPUT: (ProductInput & { created_at: string })[] = [
   {
-    id: 'prod-001',
     name: 'Kaftan Linen Sutra Sawadhee',
     category: 'Busana',
     price: 485000,
@@ -28,7 +27,6 @@ const SEED_PRODUCTS: Product[] = [
     created_at: '2026-11-10T09:00:00.000Z',
   },
   {
-    id: 'prod-002',
     name: 'Setelan Tunik Tenun Katun',
     category: 'Busana',
     price: 395000,
@@ -41,7 +39,6 @@ const SEED_PRODUCTS: Product[] = [
     created_at: '2026-11-12T10:30:00.000Z',
   },
   {
-    id: 'prod-003',
     name: 'Lilin Aromaterapi Cendana & Teh Putih',
     category: 'Aroma & Rumah',
     price: 165000,
@@ -54,7 +51,6 @@ const SEED_PRODUCTS: Product[] = [
     created_at: '2026-11-14T11:15:00.000Z',
   },
   {
-    id: 'prod-004',
     name: 'Diffuser Ruangan Amber Botanikal',
     category: 'Aroma & Rumah',
     price: 215000,
@@ -67,7 +63,6 @@ const SEED_PRODUCTS: Product[] = [
     created_at: '2026-11-15T14:20:00.000Z',
   },
   {
-    id: 'prod-005',
     name: 'Tas Anyam Rotan & Kulit Nabati',
     category: 'Aksesori',
     price: 340000,
@@ -80,7 +75,6 @@ const SEED_PRODUCTS: Product[] = [
     created_at: '2026-11-18T08:45:00.000Z',
   },
   {
-    id: 'prod-006',
     name: 'Syal Voile Motif Tropis Terbatas',
     category: 'Aksesori',
     price: 145000,
@@ -94,142 +88,191 @@ const SEED_PRODUCTS: Product[] = [
   },
 ];
 
-const SEED_ORDERS: Order[] = [
-  {
-    id: 'ord-001',
-    order_code: 'SWD-20261124-101',
-    customer_name: 'Nadia Kusuma',
-    customer_phone: '081298765432',
-    shipping_address: 'Jl. Kemang Raya No. 42, Jakarta Selatan, DKI Jakarta 12730',
-    items: [
-      {
-        product_id: 'prod-001',
-        product_name: 'Kaftan Linen Sutra Sawadhee',
-        price: 485000,
-        quantity: 1,
-        subtotal: 485000,
-      },
-      {
-        product_id: 'prod-003',
-        product_name: 'Lilin Aromaterapi Cendana & Teh Putih',
-        price: 165000,
-        quantity: 2,
-        subtotal: 330000,
-      },
-    ],
-    total_amount: 815000,
-    payment_status: 'paid',
-    order_status: 'completed',
-    notes: 'Mohon bungkus dengan pita kado.',
-    created_at: '2026-11-24T09:15:00.000Z',
-    updated_at: '2026-11-25T15:30:00.000Z',
-  },
-  {
-    id: 'ord-002',
-    order_code: 'SWD-20261125-204',
-    customer_name: 'Raka Pratama',
-    customer_phone: '085611223344',
-    shipping_address: 'Jl. Dago Pakar Barat No. 18, Coblong, Kota Bandung 40191',
-    items: [
-      {
-        product_id: 'prod-005',
-        product_name: 'Tas Anyam Rotan & Kulit Nabati',
-        price: 340000,
-        quantity: 1,
-        subtotal: 340000,
-      },
-    ],
-    total_amount: 340000,
-    payment_status: 'paid',
-    order_status: 'processing',
-    notes: 'Kirim sebelum akhir pekan ya.',
-    created_at: '2026-11-25T13:40:00.000Z',
-    updated_at: '2026-11-25T16:00:00.000Z',
-  },
-  {
-    id: 'ord-003',
-    order_code: 'SWD-20261126-309',
-    customer_name: 'Siti Rahmawati',
-    customer_phone: '081344556677',
-    shipping_address: 'Perumahan Citra Indah Blok C5 No. 9, Surabaya 60213',
-    items: [
-      {
-        product_id: 'prod-002',
-        product_name: 'Setelan Tunik Tenun Katun',
-        price: 395000,
-        quantity: 1,
-        subtotal: 395000,
-      },
-      {
-        product_id: 'prod-004',
-        product_name: 'Diffuser Ruangan Amber Botanikal',
-        price: 215000,
-        quantity: 1,
-        subtotal: 215000,
-      },
-    ],
-    total_amount: 610000,
-    payment_status: 'pending',
-    order_status: 'new',
-    created_at: '2026-11-26T03:20:00.000Z',
-    updated_at: '2026-11-26T03:20:00.000Z',
-  },
-];
+let seedPromise: Promise<void> | null = null;
 
-function ensureSeeded(): void {
-  const alreadySeeded = localStorage.getItem(SEEDED_STORAGE_KEY);
-  if (!alreadySeeded) {
-    localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(SEED_PRODUCTS));
-    localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(SEED_ORDERS));
-    localStorage.setItem(SEEDED_STORAGE_KEY, 'true');
-  }
+function mapProduct(row: Record<string, unknown>): Product {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    category: String(row.category),
+    price: Number(row.price),
+    stock: Number(row.stock),
+    description: String(row.description ?? ''),
+    image_url: String(row.image_url),
+    is_active: Boolean(row.is_active),
+    created_at: String(row.created_at),
+  };
 }
 
-function readProductsSync(): Product[] {
-  ensureSeeded();
-  const raw = localStorage.getItem(PRODUCTS_STORAGE_KEY);
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as Product[];
-  } catch {
-    return [];
-  }
+function mapOrder(row: Record<string, unknown>): Order {
+  const rawItems = Array.isArray(row.items) ? (row.items as OrderItem[]) : [];
+  return {
+    id: String(row.id),
+    order_code: String(row.order_code),
+    customer_name: String(row.customer_name),
+    customer_phone: String(row.customer_phone),
+    shipping_address: String(row.shipping_address),
+    items: rawItems.map((i) => ({
+      product_id: String(i.product_id),
+      product_name: String(i.product_name),
+      price: Number(i.price),
+      quantity: Number(i.quantity),
+      subtotal: Number(i.subtotal),
+    })),
+    total_amount: Number(row.total_amount),
+    payment_status: row.payment_status as PaymentStatus,
+    order_status: row.order_status as OrderStatus,
+    notes: row.notes ? String(row.notes) : undefined,
+    created_at: String(row.created_at),
+    updated_at: String(row.updated_at),
+  };
 }
 
-function writeProductsSync(products: Product[]): void {
-  localStorage.setItem(PRODUCTS_STORAGE_KEY, JSON.stringify(products));
+async function ensureSeeded(): Promise<void> {
+  if (seedPromise) return seedPromise;
+
+  seedPromise = (async () => {
+    const { count: productCount, error: countErr } = await supabase
+      .from(PRODUCTS_TABLE)
+      .select('id', { count: 'exact', head: true });
+
+    if (countErr) {
+      throw new Error(countErr.message);
+    }
+
+    if ((productCount ?? 0) > 0) return;
+
+    const { data: insertedProducts, error: insertProdErr } = await supabase
+      .from(PRODUCTS_TABLE)
+      .insert(SEED_PRODUCTS_INPUT)
+      .select('*');
+
+    if (insertProdErr || !insertedProducts) {
+      throw new Error(insertProdErr?.message ?? 'Gagal mengisi data awal produk.');
+    }
+
+    const mapped = insertedProducts.map(mapProduct);
+    const byName = new Map(mapped.map((p) => [p.name, p]));
+
+    const p1 = byName.get('Kaftan Linen Sutra Sawadhee');
+    const p2 = byName.get('Setelan Tunik Tenun Katun');
+    const p3 = byName.get('Lilin Aromaterapi Cendana & Teh Putih');
+    const p4 = byName.get('Diffuser Ruangan Amber Botanikal');
+    const p5 = byName.get('Tas Anyam Rotan & Kulit Nabati');
+
+    if (p1 && p2 && p3 && p4 && p5) {
+      const { count: orderCount } = await supabase
+        .from(ORDERS_TABLE)
+        .select('id', { count: 'exact', head: true });
+
+      if ((orderCount ?? 0) === 0) {
+        const seedOrders = [
+          {
+            order_code: 'SWD-20261124-101',
+            customer_name: 'Nadia Kusuma',
+            customer_phone: '081298765432',
+            shipping_address:
+              'Jl. Kemang Raya No. 42, Jakarta Selatan, DKI Jakarta 12730',
+            items: [
+              {
+                product_id: p1.id,
+                product_name: p1.name,
+                price: p1.price,
+                quantity: 1,
+                subtotal: p1.price,
+              },
+              {
+                product_id: p3.id,
+                product_name: p3.name,
+                price: p3.price,
+                quantity: 2,
+                subtotal: p3.price * 2,
+              },
+            ],
+            total_amount: p1.price + p3.price * 2,
+            payment_status: 'paid',
+            order_status: 'completed',
+            notes: 'Mohon bungkus dengan pita kado.',
+            created_at: '2026-11-24T09:15:00.000Z',
+            updated_at: '2026-11-25T15:30:00.000Z',
+          },
+          {
+            order_code: 'SWD-20261125-204',
+            customer_name: 'Raka Pratama',
+            customer_phone: '085611223344',
+            shipping_address:
+              'Jl. Dago Pakar Barat No. 18, Coblong, Kota Bandung 40191',
+            items: [
+              {
+                product_id: p5.id,
+                product_name: p5.name,
+                price: p5.price,
+                quantity: 1,
+                subtotal: p5.price,
+              },
+            ],
+            total_amount: p5.price,
+            payment_status: 'paid',
+            order_status: 'processing',
+            notes: 'Kirim sebelum akhir pekan ya.',
+            created_at: '2026-11-25T13:40:00.000Z',
+            updated_at: '2026-11-25T16:00:00.000Z',
+          },
+          {
+            order_code: 'SWD-20261126-309',
+            customer_name: 'Siti Rahmawati',
+            customer_phone: '081344556677',
+            shipping_address:
+              'Perumahan Citra Indah Blok C5 No. 9, Surabaya 60213',
+            items: [
+              {
+                product_id: p2.id,
+                product_name: p2.name,
+                price: p2.price,
+                quantity: 1,
+                subtotal: p2.price,
+              },
+              {
+                product_id: p4.id,
+                product_name: p4.name,
+                price: p4.price,
+                quantity: 1,
+                subtotal: p4.price,
+              },
+            ],
+            total_amount: p2.price + p4.price,
+            payment_status: 'pending',
+            order_status: 'new',
+            created_at: '2026-11-26T03:20:00.000Z',
+            updated_at: '2026-11-26T03:20:00.000Z',
+          },
+        ];
+        await supabase.from(ORDERS_TABLE).insert(seedOrders);
+      }
+    }
+  })().finally(() => {
+    seedPromise = null;
+  });
+
+  return seedPromise;
 }
 
-function readOrdersSync(): Order[] {
-  ensureSeeded();
-  const raw = localStorage.getItem(ORDERS_STORAGE_KEY);
-  if (!raw) return [];
-  try {
-    return JSON.parse(raw) as Order[];
-  } catch {
-    return [];
-  }
-}
-
-function writeOrdersSync(orders: Order[]): void {
-  localStorage.setItem(ORDERS_STORAGE_KEY, JSON.stringify(orders));
-}
-
-function generateId(prefix: string): string {
-  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
-    return `${prefix}-${crypto.randomUUID().slice(0, 8)}`;
-  }
-  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
-}
-
-function generateOrderCode(existingOrders: Order[]): string {
+async function generateUniqueOrderCode(): Promise<string> {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   const datePart = `${year}${month}${day}`;
 
-  const existingCodes = new Set(existingOrders.map((o) => o.order_code));
+  const { data } = await supabase
+    .from(ORDERS_TABLE)
+    .select('order_code')
+    .like('order_code', `SWD-${datePart}-%`);
+
+  const existingCodes = new Set(
+    (data ?? []).map((r) => String((r as { order_code: string }).order_code))
+  );
+
   for (let attempt = 0; attempt < 50; attempt += 1) {
     const suffix = String(Math.floor(100 + Math.random() * 900));
     const candidate = `SWD-${datePart}-${suffix}`;
@@ -240,94 +283,107 @@ function generateOrderCode(existingOrders: Order[]): string {
   return `SWD-${datePart}-${Date.now().toString().slice(-3)}`;
 }
 
-// Simulates async API latency cleanly so swapping to Supabase later stays drop-in
-async function delay(ms = 80): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export const api = {
   // ---------------- PRODUCTS ----------------
   async getProducts(options?: { activeOnly?: boolean }): Promise<Product[]> {
-    await delay();
-    const products = readProductsSync();
-    const filtered = options?.activeOnly
-      ? products.filter((p) => p.is_active)
-      : products;
-    return filtered.sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
+    await ensureSeeded();
+
+    let query = supabase
+      .from(PRODUCTS_TABLE)
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (options?.activeOnly) {
+      query = query.eq('is_active', true);
+    }
+
+    const { data, error } = await query;
+    if (error) {
+      throw new Error(error.message);
+    }
+    return (data ?? []).map(mapProduct);
   },
 
   async createProduct(input: ProductInput): Promise<Product> {
-    await delay();
-    const products = readProductsSync();
-    const newProduct: Product = {
-      id: generateId('prod'),
-      name: input.name.trim(),
-      category: input.category.trim(),
-      price: Number(input.price),
-      stock: Number(input.stock),
-      description: input.description.trim(),
-      image_url: input.image_url.trim(),
-      is_active: input.is_active,
-      created_at: new Date().toISOString(),
-    };
-    writeProductsSync([newProduct, ...products]);
-    return newProduct;
+    const { data, error } = await supabase
+      .from(PRODUCTS_TABLE)
+      .insert({
+        name: input.name.trim(),
+        category: input.category.trim(),
+        price: Number(input.price),
+        stock: Number(input.stock),
+        description: input.description.trim(),
+        image_url: input.image_url.trim(),
+        is_active: input.is_active,
+      })
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      throw new Error(error?.message ?? 'Gagal menambahkan produk.');
+    }
+    return mapProduct(data);
   },
 
   async updateProduct(id: string, patch: Partial<ProductInput>): Promise<Product> {
-    await delay();
-    const products = readProductsSync();
-    const index = products.findIndex((p) => p.id === id);
-    if (index === -1) {
-      throw new Error('Produk tidak ditemukan.');
+    const payload: Record<string, unknown> = {};
+    if (patch.name !== undefined) payload.name = patch.name.trim();
+    if (patch.category !== undefined) payload.category = patch.category.trim();
+    if (patch.description !== undefined) payload.description = patch.description.trim();
+    if (patch.image_url !== undefined) payload.image_url = patch.image_url.trim();
+    if (patch.price !== undefined) payload.price = Number(patch.price);
+    if (patch.stock !== undefined) payload.stock = Number(patch.stock);
+    if (patch.is_active !== undefined) payload.is_active = patch.is_active;
+
+    const { data, error } = await supabase
+      .from(PRODUCTS_TABLE)
+      .update(payload)
+      .eq('id', id)
+      .select('*')
+      .single();
+
+    if (error || !data) {
+      throw new Error(error?.message ?? 'Produk tidak ditemukan.');
     }
-    const existing = products[index];
-    const updated: Product = {
-      ...existing,
-      ...patch,
-      name: patch.name !== undefined ? patch.name.trim() : existing.name,
-      category: patch.category !== undefined ? patch.category.trim() : existing.category,
-      description:
-        patch.description !== undefined ? patch.description.trim() : existing.description,
-      image_url: patch.image_url !== undefined ? patch.image_url.trim() : existing.image_url,
-      price: patch.price !== undefined ? Number(patch.price) : existing.price,
-      stock: patch.stock !== undefined ? Number(patch.stock) : existing.stock,
-    };
-    products[index] = updated;
-    writeProductsSync(products);
-    return updated;
+    return mapProduct(data);
   },
 
   async deleteProduct(id: string): Promise<void> {
-    await delay();
-    const products = readProductsSync();
-    const next = products.filter((p) => p.id !== id);
-    if (next.length === products.length) {
-      throw new Error('Produk tidak ditemukan.');
+    const { error } = await supabase.from(PRODUCTS_TABLE).delete().eq('id', id);
+    if (error) {
+      throw new Error(error.message);
     }
-    writeProductsSync(next);
   },
 
   // ---------------- ORDERS ----------------
   async getOrders(): Promise<Order[]> {
-    await delay();
-    const orders = readOrdersSync();
-    return orders.sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
+    await ensureSeeded();
+    const { data, error } = await supabase
+      .from(ORDERS_TABLE)
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      throw new Error(error.message);
+    }
+    return (data ?? []).map(mapOrder);
   },
 
   async findOrderByCodeOrPhone(query: string): Promise<Order | null> {
-    await delay();
+    await ensureSeeded();
     const trimmed = query.trim();
     if (!trimmed) return null;
 
-    const orders = readOrdersSync().sort(
-      (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-    );
+    const { data: allOrders, error } = await supabase
+      .from(ORDERS_TABLE)
+      .select('*')
+      .order('created_at', { ascending: false });
 
+    if (error) {
+      throw new Error(error.message);
+    }
+
+    const orders = (allOrders ?? []).map(mapOrder);
     const upperQuery = trimmed.toUpperCase();
     const byCode = orders.find((o) => o.order_code.toUpperCase() === upperQuery);
     if (byCode) return byCode;
@@ -344,16 +400,23 @@ export const api = {
   },
 
   async createOrder(input: CreateOrderInput): Promise<Order> {
-    await delay(120);
     if (!input.items.length) {
       throw new Error('Keranjang belanja masih kosong.');
     }
 
-    const products = readProductsSync();
-    const orders = readOrdersSync();
+    const productIds = input.items.map((i) => i.product_id);
+    const { data: prodRows, error: prodErr } = await supabase
+      .from(PRODUCTS_TABLE)
+      .select('*')
+      .in('id', productIds);
 
-    // Validate stock availability for all items before mutating anything
+    if (prodErr) {
+      throw new Error(prodErr.message);
+    }
+
+    const products = (prodRows ?? []).map(mapProduct);
     const orderItems: OrderItem[] = [];
+
     for (const reqItem of input.items) {
       const product = products.find((p) => p.id === reqItem.product_id);
       if (!product || !product.is_active) {
@@ -376,51 +439,63 @@ export const api = {
       });
     }
 
-    // Deduct ordered quantities from product stock
-    const updatedProducts = products.map((product) => {
-      const ordered = input.items.find((i) => i.product_id === product.id);
-      if (!ordered) return product;
-      return {
-        ...product,
-        stock: Math.max(0, product.stock - ordered.quantity),
-      };
-    });
+    // Deduct ordered quantities from product stock in Supabase
+    for (const reqItem of input.items) {
+      const product = products.find((p) => p.id === reqItem.product_id)!;
+      const nextStock = Math.max(0, product.stock - reqItem.quantity);
+      const { error: stockErr } = await supabase
+        .from(PRODUCTS_TABLE)
+        .update({ stock: nextStock })
+        .eq('id', product.id);
+      if (stockErr) {
+        throw new Error(`Gagal memperbarui stok ${product.name}.`);
+      }
+    }
 
     const totalAmount = orderItems.reduce((sum, item) => sum + item.subtotal, 0);
+    const orderCode = await generateUniqueOrderCode();
     const nowIso = new Date().toISOString();
 
-    const newOrder: Order = {
-      id: generateId('ord'),
-      order_code: generateOrderCode(orders),
-      customer_name: input.customer_name.trim(),
-      customer_phone: input.customer_phone.trim(),
-      shipping_address: input.shipping_address.trim(),
-      items: orderItems,
-      total_amount: totalAmount,
-      payment_status: 'pending',
-      order_status: 'new',
-      notes: input.notes?.trim() ? input.notes.trim() : undefined,
-      created_at: nowIso,
-      updated_at: nowIso,
-    };
+    const { data: created, error: orderErr } = await supabase
+      .from(ORDERS_TABLE)
+      .insert({
+        order_code: orderCode,
+        customer_name: input.customer_name.trim(),
+        customer_phone: input.customer_phone.trim(),
+        shipping_address: input.shipping_address.trim(),
+        items: orderItems,
+        total_amount: totalAmount,
+        payment_status: 'pending',
+        order_status: 'new',
+        notes: input.notes?.trim() ? input.notes.trim() : null,
+        created_at: nowIso,
+        updated_at: nowIso,
+      })
+      .select('*')
+      .single();
 
-    writeProductsSync(updatedProducts);
-    writeOrdersSync([newOrder, ...orders]);
-    return newOrder;
+    if (orderErr || !created) {
+      throw new Error(orderErr?.message ?? 'Gagal menyimpan pesanan.');
+    }
+
+    return mapOrder(created);
   },
 
   async updateOrderStatus(
     id: string,
     patch: { payment_status?: PaymentStatus; order_status?: OrderStatus }
   ): Promise<{ order: Order; stockRestored: boolean }> {
-    await delay();
-    const orders = readOrdersSync();
-    const index = orders.findIndex((o) => o.id === id);
-    if (index === -1) {
+    const { data: existingRow, error: fetchErr } = await supabase
+      .from(ORDERS_TABLE)
+      .select('*')
+      .eq('id', id)
+      .single();
+
+    if (fetchErr || !existingRow) {
       throw new Error('Pesanan tidak ditemukan.');
     }
 
-    const existing = orders[index];
+    const existing = mapOrder(existingRow);
     let stockRestored = false;
 
     // Business rule: If order_status transitions to 'cancelled' from a non-cancelled state,
@@ -429,38 +504,53 @@ export const api = {
       patch.order_status === 'cancelled' &&
       existing.order_status !== 'cancelled'
     ) {
-      const products = readProductsSync();
-      const restoredProducts = products.map((product) => {
-        const orderItem = existing.items.find((i) => i.product_id === product.id);
-        if (!orderItem) return product;
-        return {
-          ...product,
-          stock: product.stock + orderItem.quantity,
-        };
-      });
-      writeProductsSync(restoredProducts);
+      const itemProductIds = existing.items.map((i) => i.product_id);
+      const { data: prodRows } = await supabase
+        .from(PRODUCTS_TABLE)
+        .select('id, stock')
+        .in('id', itemProductIds);
+
+      const stockMap = new Map(
+        (prodRows ?? []).map((r) => [
+          String((r as { id: string }).id),
+          Number((r as { stock: number }).stock),
+        ])
+      );
+
+      for (const orderItem of existing.items) {
+        const currentStock = stockMap.get(orderItem.product_id);
+        if (currentStock !== undefined) {
+          await supabase
+            .from(PRODUCTS_TABLE)
+            .update({ stock: currentStock + orderItem.quantity })
+            .eq('id', orderItem.product_id);
+        }
+      }
       stockRestored = true;
     }
 
-    const updated: Order = {
-      ...existing,
-      payment_status: patch.payment_status ?? existing.payment_status,
-      order_status: patch.order_status ?? existing.order_status,
-      updated_at: new Date().toISOString(),
-    };
+    const { data: updatedRow, error: updateErr } = await supabase
+      .from(ORDERS_TABLE)
+      .update({
+        payment_status: patch.payment_status ?? existing.payment_status,
+        order_status: patch.order_status ?? existing.order_status,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select('*')
+      .single();
 
-    orders[index] = updated;
-    writeOrdersSync(orders);
-    return { order: updated, stockRestored };
+    if (updateErr || !updatedRow) {
+      throw new Error(updateErr?.message ?? 'Gagal memperbarui status pesanan.');
+    }
+
+    return { order: mapOrder(updatedRow), stockRestored };
   },
 
   async deleteOrder(id: string): Promise<void> {
-    await delay();
-    const orders = readOrdersSync();
-    const next = orders.filter((o) => o.id !== id);
-    if (next.length === orders.length) {
-      throw new Error('Pesanan tidak ditemukan.');
+    const { error } = await supabase.from(ORDERS_TABLE).delete().eq('id', id);
+    if (error) {
+      throw new Error(error.message);
     }
-    writeOrdersSync(next);
   },
 };
